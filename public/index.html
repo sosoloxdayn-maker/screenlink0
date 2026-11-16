@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScreenLink</title><script src="/socket.io/socket.io.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#090e18;color:#f4f7ff;font:16px system-ui,Arial}
+main{max-width:760px;margin:auto;padding:25px 17px 50px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:25px}
+.brand{display:flex;align-items:center;gap:12px}.logo{background:linear-gradient(135deg,#5688ff,#43d5df);color:#081321;border-radius:13px;width:43px;height:43px;display:grid;place-items:center;font-weight:900;font-size:22px}
+h1{font-size:22px;margin:0}.muted{color:#9baac0;font-size:13px;line-height:1.5}.pill{border:1px solid #285b50;background:#102820;color:#8df0c5;padding:7px 10px;border-radius:30px;font-size:12px}
+.panel{background:#111b2b;border:1px solid #283750;border-radius:19px;padding:19px;margin:14px 0}.hero{background:linear-gradient(140deg,#182943,#101827);padding:23px}.hero h2{margin:0 0 7px;font-size:24px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}button{border:0;border-radius:12px;background:linear-gradient(100deg,#5688ff,#4d72e9);color:white;padding:13px 15px;font-weight:700;font-size:14px;cursor:pointer;width:100%;margin-top:10px}
+button.alt{background:#1a2940;border:1px solid #354a69}button:disabled{opacity:.45;cursor:not-allowed}
+input{width:100%;background:#080f1b;color:white;border:1px solid #34445e;border-radius:10px;padding:12px;margin-top:8px}
+video{width:100%;background:#05080d;border-radius:12px;margin-top:12px;max-height:380px}
+.notice{border-left:3px solid #e0b65a;padding:10px 12px;background:#211d14;color:#e9d7a7;border-radius:7px;font-size:12px;line-height:1.5}
+.check{display:flex;gap:9px;align-items:flex-start;margin-top:12px;color:#d7e2f5;font-size:13px;line-height:1.45}.check input{width:auto;margin:3px 0}
+a{color:#9abaff;word-break:break-all}.hidden{display:none}
+@media(max-width:560px){.actions{grid-template-columns:1fr}.hero h2{font-size:21px}}
+</style></head><body><main>
+<header class="top"><div class="brand"><div class="logo">S</div><div><h1>ScreenLink</h1><div class="muted">SCREEN SHARE & RECORD</div></div></div><span class="pill">● Защищённая комната</span></header>
+<section class="panel hero"><h2>Подключение к экрану</h2><div class="muted">Создай комнату и отправь ссылку. Демонстрация и запись начинаются только после явного согласия участников.</div></section>
+<section class="actions">
+<div class="panel"><h3>1. Сделать ссылку</h3><div class="muted">Создать комнату для подключения другого устройства.</div><button id="create">Создать ссылку</button><div id="share" class="hidden"><p class="muted">Отправь эту ссылку участнику:</p><a id="roomlink"></a><button class="alt" id="copy">Копировать ссылку</button></div></div>
+<div class="panel"><h3>2. Посмотреть запись</h3><div class="muted">Открыть видео, записанное в этой вкладке.</div><button class="alt" id="showRecords">Посмотреть запись</button></div>
+</section>
+<section class="panel"><h3 id="roomTitle">Комната</h3><div id="status" class="muted">Создай комнату или открой приглашение, полученное от другого участника.</div>
+<div id="joinBox" class="hidden"><label class="check"><input type="checkbox" id="consent">Я понимаю, что мой экран будет передаваться участнику, а видеопоток будет записываться.</label><button id="join">Присоединиться и разрешить просмотр</button></div>
+<div id="hostBox" class="hidden"><div class="notice">Перед началом убедись, что участник знает о трансляции и записи. Браузер покажет системный выбор экрана.</div><label class="check"><input type="checkbox" id="hostConsent">Я согласен(на) передавать выбранный экран и разрешаю запись этой демонстрации.</label><button id="shareScreen">Поделиться экраном</button></div>
+<video id="remote" autoplay playsinline controls class="hidden"></video><video id="local" autoplay muted playsinline class="hidden"></video>
+<button id="stop" class="alt hidden">Остановить подключение</button></section>
+<section class="panel hidden" id="recordPanel"><h3>Сохранённые записи</h3><div id="records" class="muted">Записей пока нет.</div></section>
+<p class="muted">Подсказка: для работы по интернету приложение должно быть размещено на HTTPS-хостинге. Видеопоток передаётся напрямую между устройствами через WebRTC; сервер комнаты не сохраняет видео.</p>
+</main>
+<script>
+const socket=io();const $=id=>document.getElementById(id);
+let room=null,role=null,pc=null,localStream=null,rec=null,parts=[],saved=[],remoteStream=null;
+const ice={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
+function status(t){$("status").textContent=t}
+function show(el){$(el).classList.remove("hidden")}function hide(el){$(el).classList.add("hidden")}
+function roomUrl(id){return location.origin+"/room/"+id}
+function setupRoom(id,r){room=id;role=r;socket.emit("join-room",{room,role});$("roomTitle").textContent="Комната "+id}
+const path=location.pathname.match(/^\/room\/([a-z0-9]{6,20})$/i);
+if(path){setupRoom(path[1],"viewer");show("joinBox");status("Проверь согласие на просмотр и запись, затем присоединись к комнате.")}
+$("create").onclick=()=>socket.emit("create-room");
+socket.on("room-created",id=>{room=id;role="host";setupRoom(id,"host");const u=roomUrl(id);$("roomlink").href=u;$("roomlink").textContent=u;show("share");show("hostBox");status("Комната создана. Отправь ссылку и дождись участника.")});
+$("copy").onclick=async()=>{try{await navigator.clipboard.writeText($("roomlink").href);$("copy").textContent="Скопировано"}catch{status("Не удалось скопировать автоматически. Выдели ссылку вручную.")}};
+socket.on("joined-room",()=>{if(role==="viewer")status("Ты в комнате. Подтверди согласие, чтобы подключиться.")});
+socket.on("peer-joined",()=>{status("Участник подключился. Можно начинать демонстрацию.")});
+async function makePC(){pc=new RTCPeerConnection(ice);pc.onicecandidate=e=>{if(e.candidate)socket.emit("ice",e.candidate)};
+pc.ontrack=e=>{remoteStream=e.streams[0];$("remote").srcObject=remoteStream;show("remote");startRecording(remoteStream)};
+pc.onconnectionstatechange=()=>status("Состояние соединения: "+pc.connectionState);
+}
+$("join").onclick=async()=>{if(!$("consent").checked){status("Сначала подтверди согласие.");return}hide("joinBox");show("stop");status("Ожидание демонстрации экрана…");await makePC();};
+$("shareScreen").onclick=async()=>{if(!$("hostConsent").checked){status("Сначала подтверди согласие на трансляцию и запись.");return}
+try{localStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});$("local").srcObject=localStream;show("local");hide("hostBox");show("stop");await makePC();localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));const offer=await pc.createOffer();await pc.setLocalDescription(offer);socket.emit("offer",offer);status("Экран передаётся. Запись начнётся на устройстве зрителя.");localStream.getVideoTracks()[0].onended=stopAll;}catch(e){status("Не удалось начать демонстрацию: "+e.message)}};
+socket.on("offer",async offer=>{if(role!=="viewer"||!pc)return;await pc.setRemoteDescription(offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);socket.emit("answer",answer);status("Подключение к экрану…")});
+socket.on("answer",async answer=>{if(pc)await pc.setRemoteDescription(answer)});
+socket.on("ice",async c=>{if(pc)try{await pc.addIceCandidate(c)}catch(e){}});
+function startRecording(stream){if(!stream||!window.MediaRecorder)return;parts=[];try{rec=new MediaRecorder(stream);rec.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};rec.onstop=()=>{if(parts.length){const blob=new Blob(parts,{type:rec.mimeType||"video/webm"});saved.unshift({url:URL.createObjectURL(blob),time:new Date()});renderRecords()}};rec.start();socket.emit("recording-started");status("Экран подключён. Идёт запись; участники видят статус подключения и записи.");}catch(e){status("Браузер не поддерживает запись: "+e.message)}}
+socket.on("recording-started",()=>{if(role==="host")status("Участник начал запись. Демонстрация активна.")});
+socket.on("recording-stopped",()=>{if(role==="host")status("Запись остановлена.")});
+function stopAll(){if(rec&&rec.state!=="inactive")rec.stop();if(localStream)localStream.getTracks().forEach(t=>t.stop());if(pc){pc.close();pc=null}socket.emit("recording-stopped");socket.emit("leave-room");hide("remote");hide("local");hide("stop");status("Подключение остановлено.");}
+$("stop").onclick=stopAll;
+$("showRecords").onclick=()=>{show("recordPanel");renderRecords();$("recordPanel").scrollIntoView({behavior:"smooth"})};
+function renderRecords(){const box=$("records");box.innerHTML="";if(!saved.length){box.textContent="Записей пока нет.";return}saved.forEach((r,i)=>{const d=document.createElement("div");d.style.margin="14px 0";const label=document.createElement("div");label.textContent="Запись "+(i+1)+" · "+r.time.toLocaleString("ru-RU");const v=document.createElement("video");v.controls=true;v.src=r.url;const a=document.createElement("a");a.href=r.url;a.download="screenlink-"+(i+1)+".webm";a.textContent="Скачать запись";d.append(label,v,a);box.append(d)})}
+socket.on("peer-left",()=>status("Другой участник отключился."));
+socket.on("app-error",msg=>status(msg));
+</script></body></html>
